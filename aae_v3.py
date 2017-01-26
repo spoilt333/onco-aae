@@ -51,6 +51,9 @@ def uniform_initializer(size_1, size_2):
     normalized_size = np.sqrt(6) / (np.sqrt(size_1 + size_2))
     return tf.random_uniform([size_1, size_2], minval=-normalized_size, maxval=normalized_size)
 
+def gauss_initializer(size_1, size_2):
+    return tf.random_normal([size_1, size_2], 0, 2. / (size_1 * size_2))
+
 def identity_function(x, name):
     return x
 
@@ -80,7 +83,8 @@ class AAE(object):
                  learning_rate=0.01,
                  encoder_layers=2, 
                  decoder_layers=2,
-                 discriminator_layers=1):
+                 discriminator_layers=1,
+                 initializer=gauss_initializer):
 
         self.pretrain_batch_size = pretrain_batch_size
         self.batch_size = batch_size
@@ -91,6 +95,8 @@ class AAE(object):
         self.discriminator_layers = discriminator_layers
         self.input_space = input_space
 
+        self.initializer = initializer
+
         self.fingerprint_tensor = tf.placeholder(tf.float32, [None, input_space])
         self.prior_tensor = tf.placeholder(tf.float32, [None, latent_space])
         self.conc_tensor = tf.placeholder(tf.float32, [None, 1])
@@ -99,7 +105,7 @@ class AAE(object):
 
         self.visible_tensor = tf.concat(1, [self.fingerprint_tensor, self.conc_tensor])
         self.hidden_tensor = tf.concat(1, [self.prior_tensor, self.tgi_tensor])
-        
+
         # Encoder net: 166+1->128->64->3+1
         
         with tf.name_scope("encoder"):
@@ -130,7 +136,7 @@ class AAE(object):
 
             for layer_number in xrange(decoder_layers):
                 with tf.name_scope("decoder-%s" % layer_number):
-                    w = tf.Variable(uniform_initializer(sizes[layer_number], sizes[layer_number + 1]), name="W")
+                    w = tf.Variable(self.initializer(sizes[layer_number], sizes[layer_number + 1]), name="W")
                     b = tf.Variable(tf.random_normal([sizes[layer_number + 1]]), name="b")
                     dec_l = tf.nn.tanh(tf.add(tf.matmul(decoder[-1], w), b), name="dec_l")
                     gen_l = tf.nn.tanh(tf.add(tf.matmul(generator[-1], w), b), name="gen_l")
@@ -138,13 +144,13 @@ class AAE(object):
                     generator.append(gen_l)
 
             with tf.name_scope("decoder-fp"):
-                w = tf.Variable(uniform_initializer(sizes[-2], sizes[-1]), name="W")
+                w = tf.Variable(self.initializer(sizes[-2], sizes[-1]), name="W")
                 b = tf.Variable(tf.random_normal([sizes[-1]]), name="b")
                 self.decoded_fp = tf.add(tf.matmul(decoder[-1], w), b, name="decoder_fp")
                 self.gen_fp = tf.nn.relu(tf.add(tf.matmul(generator[-1], w), b), name="gen_fp")
 
             with tf.name_scope("decoder-conc"):
-                w = tf.Variable(uniform_initializer(sizes[-2], 1), name="W")
+                w = tf.Variable(self.initializer(sizes[-2], 1), name="W")
                 b = tf.Variable(tf.random_normal([1]), name="b")
                 self.decoded_conc = tf.add(tf.matmul(decoder[-1], w), b)
                 self.gen_conc = tf.add(tf.matmul(generator[-1], w), b)
@@ -154,11 +160,11 @@ class AAE(object):
             discriminator_enc = [self.encoded_fp]
             discriminator_prior = [self.prior_tensor]
 
-            sizes = [self.latent_space, 2 * self.latent_space - 1, 1]
+            sizes = [self.latent_space, 2 * self.latent_space - 2, 1]
 
             for layer_number in xrange(discriminator_layers):
                 with tf.name_scope("discriminator-%s" % layer_number):
-                    w = tf.Variable(uniform_initializer(sizes[layer_number], sizes[layer_number + 1]), name="W")
+                    w = tf.Variable(self.initializer(sizes[layer_number], sizes[layer_number + 1]), name="W")
                     b = tf.Variable(tf.random_normal([sizes[layer_number + 1]]), name="b")
                     disc_enc = tf.nn.relu(tf.add(tf.matmul(discriminator_enc[-1], w), b), name="disc_enc")
                     disc_prior = tf.nn.relu(tf.add(tf.matmul(discriminator_prior[-1], w), b), name="disc_prior")
@@ -167,7 +173,7 @@ class AAE(object):
                     discriminator_prior.append(disc_prior)
 
             with tf.name_scope("discriminator-final"):
-                w = tf.Variable(uniform_initializer(sizes[-2], sizes[-1]), name="W")
+                w = tf.Variable(self.initializer(sizes[-2], sizes[-1]), name="W")
                 b = tf.Variable(tf.random_normal([sizes[-1]]), name="b")
                 self.disc_enc = tf.add(tf.matmul(discriminator_enc[-1], w), b, name="disc_enc")
                 self.disc_prior = tf.add(tf.matmul(discriminator_prior[-1], w), b, name="disc_prior")
@@ -213,8 +219,8 @@ class AAE(object):
         batches = batch_gen(self.train_data, self.batch_size)
         sames = same_gen(self.unique_fp, n_different=32)
         for e in xrange(50):
-            # if e > 0 and e % 10 == 0:
-                # saver.save(sess, './uniform.adam.aae.manifold.%de.model.ckpt' % e)
+            if e > 0 and e % 10 == 0:
+                saver.save(sess, './adam.aae.manifold.%de.model.ckpt' % e)
             
             print("epoch #%d" % e)
             
@@ -320,8 +326,5 @@ class AAE(object):
                 if (e >= 5) and (encoder_fp_loss < 0.7):
                     flag = False
                     break
-
-
-
 
 
